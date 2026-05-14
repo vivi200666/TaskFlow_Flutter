@@ -13,7 +13,7 @@ class Tarea {
     required this.completada
   });
 
-  // Este es el método clave: convierte el JSON de Django a objeto Dart
+  // Este es el método clave: convierte el JSON de Django a objeto Dart 
   factory Tarea.fromJson(Map<String, dynamic> json) {
     return Tarea(
       id: json['id'],
