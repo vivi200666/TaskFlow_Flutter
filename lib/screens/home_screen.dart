@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../bloc/tareas_cubit.dart';
-import '../bloc/tareas_state.dart';
+import '../bloc/task/task_cubit.dart';
+import '../bloc/task/task_state.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});

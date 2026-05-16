@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'data/api_provider.dart';
-import 'bloc/tareas_cubit.dart';
+import 'bloc/task/task_cubit.dart';
 import 'screens/home_screen.dart';
 
 void main() {
@@ -22,9 +22,9 @@ class MyApp extends StatelessWidget {
         // 2. Inyectamos el Cubit y le pasamos el Provider
         providers: [
           BlocProvider(
-            create: (context) => TareasCubit(
+            create: (context) => TaskCubit(
               context.read<ApiProvider>(),
-            )..cargarTareas(), // Llamamos a cargar tareas de una vez
+            )..cargarYFiltrarTareas(), // Llamamos a cargar tareas de una vez
           ),
         ],
         child: MaterialApp(
