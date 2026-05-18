@@ -20,8 +20,8 @@ class AuthCubit extends Cubit<AuthState> {
 
       final data = await apiProvider.login(username, password);
       
-      // Extraemos el token y el ID que nos manda Django
-      final String token = data['token'] ?? '';
+      // ✅ CORRECCIÓN: SimpleJWT usa 'access' para el token
+      final String token = data['access'] ?? '';
       final int usuarioId = data['user_id'] ?? 0;
 
       // Emitimos éxito guardando los datos requeridos (Tu cuaderno)

@@ -7,31 +7,56 @@ class TaskCubit extends Cubit<TaskState> {
 
   TaskCubit(this.apiProvider) : super(TaskInitial());
 
-  // Función obligatoria según tu cuaderno: Cargar y filtrar tareas
-  Future<void> cargarYFiltrarTareas() async {
+  // 1. CARGAR TAREAS: Esta ya la tienes bien
+  Future<void> cargarYFiltrarTareas(String token) async {
     try {
-      emit(TaskLoading()); // Emitimos estado de carga
+      emit(TaskLoading());
+      final todasLasTareas = await apiProvider.getTareas(token);
 
-      // Traemos las tareas reales desde PostgreSQL a través del backend
-      final todasLasTareas = await apiProvider.getTareas();
+      if (todasLasTareas.isEmpty) {
+        emit(TaskLoaded(tareasPersonales: [], tareasEquipo: []));
+        return;
+      }
 
-      // Filtramos en Dart según las reglas de tu negocio (Tu cuaderno)
-      // Nota: Asumiendo que tu modelo 'Tarea' tiene un campo de tipo o equipo.
-      // Si tu backend ya las separa, se ajustará luego; por ahora lo separamos lógicamente:
-      final personales = todasLasTareas.where((t) => t.estado == 'PERSONAL' || t.id % 2 == 0).toList();
-      final equipo = todasLasTareas.where((t) => !personales.contains(t)).toList();
+      final personales = todasLasTareas
+          .where((t) => t.estado == 'TODO' || t.estado == 'PROG') 
+          .toList();
+
+      final equipo = todasLasTareas
+          .where((t) => t.estado == 'DONE')
+          .toList();
 
       emit(TaskLoaded(tareasPersonales: personales, tareasEquipo: equipo));
     } catch (e) {
-      // Manejo controlado de excepciones (Criterio 9)
-      emit(TaskError("Error al sincronizar tareas: ${e.toString()}"));
+      print("DEBUG ERROR: $e");
+      emit(TaskError("Error al cargar tareas: ${e.toString()}"));
     }
   }
 
-  // Función obligatoria según tu cuaderno: Moverlas en el Kanban
-  Future<void> moverTareaKanban(int tareaId, String nuevoEstado) async {
-    // Aquí irá la lógica para hacer un PUT/PATCH a Django y avisar que la tarea cambió de columna
-    // Por ahora, simulamos el cambio de estado de carga rápido
-    print("Moviendo tarea $tareaId a la columna: $nuevoEstado");
+  // 2. AGREGAR NUEVA TAREA: Esta es la que debes añadir
+  Future<void> agregarNuevaTarea(String titulo, String descripcion, String token) async {
+    try {
+      // Llamamos al provider para que hable con Django
+      await apiProvider.crearTarea(titulo, descripcion, token);
+      
+      // IMPORTANTE: Después de crearla, llamamos a cargarYFiltrarTareas
+      // para que la lista se actualice sola en la pantalla
+      await cargarYFiltrarTareas(token);
+      
+    } catch (e) {
+      print("Error al agregar tarea: $e");
+      emit(TaskError("No se pudo guardar la tarea."));
+    }
+  }
+
+  // 3. MOVER TAREA (KANBAN): Esta también ya la tenías
+  Future<void> moverTareaKanban(int tareaId, String nuevoEstado, String token) async {
+    try {
+      await apiProvider.actualizarEstadoTarea(tareaId, nuevoEstado, token);
+      await cargarYFiltrarTareas(token);
+    } catch (e) {
+      print("Error al mover tarea: $e");
+      emit(TaskError("No se pudo mover la tarea."));
+    }
   }
 }
