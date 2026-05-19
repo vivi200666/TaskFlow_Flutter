@@ -1,39 +1,69 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../data/api_provider.dart';
 import 'auth_state.dart';
 
 class AuthCubit extends Cubit<AuthState> {
   final ApiProvider apiProvider;
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   AuthCubit(this.apiProvider) : super(AuthInitial());
 
-  // Función lógica para iniciar sesión
-  Future<void> iniciarSesion(String username, String password) async {
-    // Validación básica antes de quemar datos (Criterio 9)
+  /// Try to login automatically by reading the persisted token.
+  Future<void> tryAutoLogin() async {
+    try {
+      final token = await _secureStorage.read(key: 'token');
+      final userIdStr = await _secureStorage.read(key: 'userId');
+      final userId = userIdStr != null ? int.tryParse(userIdStr) ?? 0 : 0;
+
+      if (token != null && token.isNotEmpty) {
+        emit(AuthSuccess(token: token, userId: userId));
+      } else {
+        emit(AuthInitial());
+      }
+    } catch (_) {
+      emit(AuthInitial());
+    }
+  }
+
+  /// Perform login with username and password.
+  Future<void> login(String username, String password) async {
     if (username.isEmpty || password.isEmpty) {
-      emit(const AuthError("Por favor, llena todos los campos obligatorios."));
+      emit(const AuthError("Please fill in all required fields."));
       return;
     }
 
     try {
-      emit(AuthLoading()); // Emitimos estado de carga (Criterio 6)
+      emit(AuthLoading());
 
       final data = await apiProvider.login(username, password);
-      
-      // ✅ CORRECCIÓN: SimpleJWT usa 'access' para el token
-      final String token = data['access'] ?? '';
-      final int usuarioId = data['user_id'] ?? 0;
 
-      // Emitimos éxito guardando los datos requeridos (Tu cuaderno)
-      emit(AuthSuccess(token: token, usuarioId: usuarioId));
+      final String token = data['access'] ?? '';
+      final int userId = data['user_id'] ?? 0;
+
+      if (token.isEmpty) {
+        emit(const AuthError("No token received from server."));
+        return;
+      }
+
+      await _secureStorage.write(key: 'token', value: token);
+      await _secureStorage.write(key: 'userId', value: userId.toString());
+
+      emit(AuthSuccess(token: token, userId: userId));
     } catch (e) {
-      // Control de excepciones con mensajes limpios (Criterio 9)
       emit(AuthError(e.toString().replaceAll("Exception: ", "")));
     }
   }
 
-  // Función para cerrar sesión y limpiar el estado
-  void cerrarSesion() {
-    emit(AuthInitial());
+  /// Logout and clear persisted state.
+  Future<void> logout() async {
+    try {
+      await _secureStorage.delete(key: 'token');
+      await _secureStorage.delete(key: 'userId');
+    } catch (_) {
+      // ignore errors but continue resetting state
+    } finally {
+      emit(AuthInitial());
+    }
   }
 }

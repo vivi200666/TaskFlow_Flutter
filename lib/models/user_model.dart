@@ -1,40 +1,79 @@
-class Perfil {
-  final String? imagen; // Puede ser nulo si no han subido foto
+class Profile {
+  final String? image; // can be null if no photo uploaded
   final String bio;
 
-  Perfil({
-    this.imagen,
+  Profile({
+    this.image,
     required this.bio,
   });
 
-  factory Perfil.fromJson(Map<String, dynamic> json) {
-    return Perfil(
-      imagen: json['imagen'],
+  factory Profile.fromJson(Map<String, dynamic> json) {
+    return Profile(
+      image: json['imagen'],
       bio: json['bio'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'imagen': image,
+      'bio': bio,
+    };
+  }
+
+  Profile copyWith({
+    String? image,
+    String? bio,
+  }) {
+    return Profile(
+      image: image ?? this.image,
+      bio: bio ?? this.bio,
     );
   }
 }
 
-class Usuario {
+class User {
   final int id;
   final String username;
   final String email;
-  final Perfil? perfil; // Mapea el perfil anidado del serializer
+  final Profile? profile;
 
-  Usuario({
+  User({
     required this.id,
     required this.username,
     required this.email,
-    this.perfil,
+    this.profile,
   });
 
-  factory Usuario.fromJson(Map<String, dynamic> json) {
-    return Usuario(
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
       id: json['id'],
       username: json['username'],
       email: json['email'] ?? '',
-      // Si el perfil viene en el JSON, lo parseamos usando su propio fromJson
-      perfil: json['perfil'] != null ? Perfil.fromJson(json['perfil']) : null,
+      profile: json['perfil'] != null ? Profile.fromJson(json['perfil']) : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'email': email,
+      'perfil': profile?.toJson(),
+    };
+  }
+
+  User copyWith({
+    int? id,
+    String? username,
+    String? email,
+    Profile? profile,
+  }) {
+    return User(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      email: email ?? this.email,
+      profile: profile ?? this.profile,
     );
   }
 }

@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import '../../models/task_model.dart';
 
 abstract class TaskState extends Equatable {
   const TaskState();
@@ -7,31 +6,48 @@ abstract class TaskState extends Equatable {
   List<Object?> get props => [];
 }
 
-// Estado Inicial
 class TaskInitial extends TaskState {}
 
-// Estado de Carga (Criterio 6: Muestra el circulito de progreso)
 class TaskLoading extends TaskState {}
 
-// Estado de Éxito (Contiene la lista de tareas filtradas)
-class TaskLoaded extends TaskState {
-  final List<Tarea> tareasPersonales;
-  final List<Tarea> tareasEquipo;
-
-  const TaskLoaded({
-    required this.tareasPersonales,
-    required this.tareasEquipo,
-  });
-
+class TaskError extends TaskState {
+  final String message;
+  const TaskError(this.message);
   @override
-  List<Object?> get props => [tareasPersonales, tareasEquipo];
+  List<Object?> get props => [message];
 }
 
-// Estado de Error (Criterio 9: Captura fallos sin bloquear la app)
-class TaskError extends TaskState {
-  final String mensaje;
-  const TaskError(this.mensaje);
-
+class TaskLoadedPersonal extends TaskState {
+  final List<Map<String, dynamic>> tasks;
+  const TaskLoadedPersonal({required this.tasks});
   @override
-  List<Object?> get props => [mensaje];
+  List<Object?> get props => [tasks];
+}
+
+class TaskLoadedWorkspace extends TaskState {
+  final List<Map<String, dynamic>> tasks;
+  const TaskLoadedWorkspace({required this.tasks});
+  @override
+  List<Object?> get props => [tasks];
+}
+
+class TaskCreated extends TaskState {
+  final Map<String, dynamic> task;
+  const TaskCreated({required this.task});
+  @override
+  List<Object?> get props => [task];
+}
+
+class TaskUpdated extends TaskState {
+  final Map<String, dynamic> task;
+  const TaskUpdated({required this.task});
+  @override
+  List<Object?> get props => [task];
+}
+
+class TaskDeleted extends TaskState {
+  final int id;
+  const TaskDeleted({required this.id});
+  @override
+  List<Object?> get props => [id];
 }

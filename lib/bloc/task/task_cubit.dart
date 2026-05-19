@@ -7,56 +7,144 @@ class TaskCubit extends Cubit<TaskState> {
 
   TaskCubit(this.apiProvider) : super(TaskInitial());
 
-  // 1. CARGAR TAREAS: Esta ya la tienes bien
-  Future<void> cargarYFiltrarTareas(String token) async {
+  /// Load all personal tasks of the user
+  Future<void> loadPersonalTasks(String token) async {
     try {
       emit(TaskLoading());
-      final todasLasTareas = await apiProvider.getTareas(token);
+      final list = await apiProvider.fetchTasks(token: token); // renamed
+      final orderedTasks = _orderByPriority(list);
+      emit(TaskLoadedPersonal(tasks: orderedTasks));
+    } catch (e) {
+      emit(TaskError('Error loading personal tasks: $e'));
+    }
+  }
 
-      if (todasLasTareas.isEmpty) {
-        emit(TaskLoaded(tareasPersonales: [], tareasEquipo: []));
-        return;
+  /// Load tasks of a specific workspace
+  Future<void> loadWorkspaceTasks(int workspaceId, String token) async {
+    try {
+      emit(TaskLoading());
+      final list = await apiProvider.fetchTasks(token: token, workspaceId: workspaceId); // renamed
+      final orderedTasks = _orderByPriority(list);
+      emit(TaskLoadedWorkspace(tasks: orderedTasks));
+    } catch (e) {
+      emit(TaskError('Error loading workspace tasks: $e'));
+    }
+  }
+
+  /// Create new task (personal or workspace)
+  Future<void> createTask(Map<String, dynamic> payload, String token) async {
+    try {
+      emit(TaskLoading());
+      final task = await apiProvider.createTask(payload, token);
+      emit(TaskCreated(task: task));
+    } catch (e) {
+      emit(TaskError('Error creating task: $e'));
+    }
+    print('Payload enviado: $payload');
+    print('Token: $token');
+  }
+
+  /// Update task (mark completed, move in Kanban, etc.)
+  Future<void> updateTask(int id, Map<String, dynamic> payload, String token) async {
+    try {
+      emit(TaskLoading());
+      final task = await apiProvider.updateTask(id, payload, token);
+      emit(TaskUpdated(task: task));
+    } catch (e) {
+      emit(TaskError('Error updating task: $e'));
+    }
+  }
+
+  /// Delete task
+  Future<void> deleteTask(int id, String token) async {
+    try {
+      emit(TaskLoading());
+      final success = await apiProvider.deleteTask(id, token);
+      if (success) {
+        emit(TaskDeleted(id: id));
+      } else {
+        emit(TaskError('Could not delete task'));
       }
-
-      final personales = todasLasTareas
-          .where((t) => t.estado == 'TODO' || t.estado == 'PROG') 
-          .toList();
-
-      final equipo = todasLasTareas
-          .where((t) => t.estado == 'DONE')
-          .toList();
-
-      emit(TaskLoaded(tareasPersonales: personales, tareasEquipo: equipo));
     } catch (e) {
-      print("DEBUG ERROR: $e");
-      emit(TaskError("Error al cargar tareas: ${e.toString()}"));
+      emit(TaskError('Error deleting task: $e'));
     }
   }
 
-  // 2. AGREGAR NUEVA TAREA: Esta es la que debes añadir
-  Future<void> agregarNuevaTarea(String titulo, String descripcion, String token) async {
+  /// Reset state (useful on logout)
+  void reset() {
+    emit(TaskInitial());
+  }
+
+  /// Order tasks by priority (A > M > B)
+  List<Map<String, dynamic>> _orderByPriority(List<Map<String, dynamic>> tasks) {
+    final order = {'A': 0, 'M': 1, 'B': 2};
+    tasks.sort((a, b) {
+      final pa = order[a['prioridad']] ?? 3;
+      final pb = order[b['prioridad']] ?? 3;
+      if (pa != pb) return pa.compareTo(pb);
+      final da = a['fecha_vencimiento'] ?? '';
+      final db = b['fecha_vencimiento'] ?? '';
+      return da.toString().compareTo(db.toString());
+    });
+    return tasks;
+  }
+  Future<void> loadCompletedTasks(String token) async {
     try {
-      // Llamamos al provider para que hable con Django
-      await apiProvider.crearTarea(titulo, descripcion, token);
+      emit(TaskLoading());
+      final list = await apiProvider.fetchTasks(token: token);
       
-      // IMPORTANTE: Después de crearla, llamamos a cargarYFiltrarTareas
-      // para que la lista se actualice sola en la pantalla
-      await cargarYFiltrarTareas(token);
+      // Filtramos solo las que tienen estado 'realizada' (o el nombre que uses en tu DB)
+      final completed = list.where((t) => t['estado'] == 'realizada').toList();
       
+      // Reutilizamos TaskLoadedPersonal o puedes crear TaskLoadedCompleted en tu state
+      emit(TaskLoadedPersonal(tasks: completed)); 
     } catch (e) {
-      print("Error al agregar tarea: $e");
-      emit(TaskError("No se pudo guardar la tarea."));
+      emit(TaskError('Error al cargar tareas completadas: $e'));
     }
   }
-
-  // 3. MOVER TAREA (KANBAN): Esta también ya la tenías
-  Future<void> moverTareaKanban(int tareaId, String nuevoEstado, String token) async {
+  Future<void> loadUpcomingTasks(String token) async {
     try {
-      await apiProvider.actualizarEstadoTarea(tareaId, nuevoEstado, token);
-      await cargarYFiltrarTareas(token);
+      emit(TaskLoading());
+      final list = await apiProvider.fetchTasks(token: token);
+      
+      // Filtramos las que NO están terminadas y tienen fecha
+      final upcoming = list.where((t) => 
+        t['estado'] != 'realizada' && t['fecha_vencimiento'] != null
+      ).toList();
+      
+      emit(TaskLoadedPersonal(tasks: upcoming));
     } catch (e) {
-      print("Error al mover tarea: $e");
-      emit(TaskError("No se pudo mover la tarea."));
+      emit(TaskError('Error al cargar próximas tareas: $e'));
     }
   }
+  // En task_cubit.dart
+
+  Future<void> updateTaskStatus(int id, String newStatus, String token) async {
+    try {
+      // 1. Avisamos al backend
+      await apiProvider.updateTaskStatus(id, newStatus, token);
+
+      // 2. Actualizamos la lista que ya tenemos en memoria (Optimización)
+      if (state is TaskLoadedWorkspace) {
+        final currentTasks = List<Map<String, dynamic>>.from((state as TaskLoadedWorkspace).tasks);
+        
+        // Buscamos la tarea y le cambiamos el estado localmente
+        final index = currentTasks.indexWhere((t) => t['id'] == id);
+        if (index != -1) {
+          currentTasks[index]['estado'] = newStatus;
+          // Emitimos el nuevo estado con la lista modificada para que la UI se refresque
+          emit(TaskLoadedWorkspace(tasks: _orderByPriority(currentTasks)));
+        }
+      }
+    } catch (e) {
+      emit(TaskError('Error al mover la tarea: $e'));
+    }
+  }
+  /// Emite estado de carga para limpiar la UI inmediatamente al cambiar de vista
+  void emitLoading() {
+    emit(TaskLoading());
+  }
+        
+  
+
 }

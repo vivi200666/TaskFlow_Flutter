@@ -1,26 +1,74 @@
-class Tarea {
+class Task {
   final int id;
-  final String titulo;
-  final String descripcion;
-  final String estado;
-  final bool completada;
+  final String title;
+  final String description;
+  final String status;
+  final String priority;
+  final String? dueDate;
+  final bool completed;
+  final int? categoryId;
+  final Map<String, dynamic>? categoryDetails;
 
-  Tarea({
-    required this.id, 
-    required this.titulo, 
-    required this.descripcion, 
-    required this.estado,
-    required this.completada
+  Task({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.status,
+    required this.priority,
+    this.dueDate,
+    required this.completed,
+    this.categoryId,
+    this.categoryDetails,
   });
 
-  // Este es el método clave: convierte el JSON de Django a objeto Dart 
-  factory Tarea.fromJson(Map<String, dynamic> json) {
-    return Tarea(
+  factory Task.fromJson(Map<String, dynamic> json) {
+    return Task(
       id: json['id'],
-      titulo: json['titulo'],
-      descripcion: json['descripcion'] ?? '',
-      estado: json['estado'],
-      completada: json['completada'],
+      title: json['titulo'],
+      description: json['descripcion'] ?? '',
+      status: json['estado'] ?? 'TODO',
+      priority: json['prioridad'] ?? 'M',
+      dueDate: json['fecha_vencimiento'],
+      completed: json['completada'] ?? false,
+      categoryId: json['categoria'],
+      categoryDetails: json['categoria_detalles'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'titulo': title,
+      'descripcion': description,
+      'estado': status,
+      'prioridad': priority,
+      'fecha_vencimiento': dueDate,
+      'completada': completed,
+      'categoria': categoryId,
+    };
+  }
+
+  Task copyWith({
+    int? id,
+    String? title,
+    String? description,
+    String? status,
+    String? priority,
+    String? dueDate,
+    bool? completed,
+    int? categoryId,
+    Map<String, dynamic>? categoryDetails,
+  }) {
+    return Task(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      status: status ?? this.status,
+      priority: priority ?? this.priority,
+      dueDate: dueDate ?? this.dueDate,
+      completed: completed ?? this.completed,
+      categoryId: categoryId ?? this.categoryId,
+      categoryDetails: categoryDetails ?? this.categoryDetails,
     );
   }
 }
