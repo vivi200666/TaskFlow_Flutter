@@ -3,7 +3,12 @@ import 'package:http/http.dart' as http;
 import '../models/task_model.dart';
 import '../models/category_model.dart';
 import '../models/user_model.dart';
-
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import '../models/task_model.dart';
+import '../models/category_model.dart';
+import '../models/user_model.dart';
 class ApiProvider {
   final String baseUrl = "http://127.0.0.1:8000/api";
 
@@ -27,13 +32,12 @@ class ApiProvider {
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"username": username, "password": password}),
     );
-
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else if (response.statusCode == 401) {
-      throw Exception("Invalid credentials.");
+      throw Exception("Credenciales inválidas.");
     } else {
-      throw Exception("Server error: ${response.statusCode}");
+      throw Exception("Error del servidor: ${response.statusCode}");
     }
   }
 
@@ -192,10 +196,94 @@ class ApiProvider {
 
   Future<List<Map<String, dynamic>>> fetchWorkspaceMembers(int workspaceId, String token) async {
     final url = Uri.parse('$baseUrl/workspaces/$workspaceId/members/');
+    print('🔍 Llamando a: $url');  // 👈 Ver URL
     final response = await http.get(url, headers: _getHeaders(token));
+    print('📦 Código respuesta: ${response.statusCode}');  // 👈 Ver código HTTP
+    print('📄 Cuerpo: ${response.body}');                 // 👈 Ver respuesta completa
     if (response.statusCode == 200) {
       return List<Map<String, dynamic>>.from(jsonDecode(response.body));
     }
     throw Exception('Failed to load workspace members');
+  }
+  // ---------------------------------------------------------
+// 📊 WORKSPACE METRICS
+// ---------------------------------------------------------
+  Future<Map<String, dynamic>> fetchWorkspaceMetrics(int workspaceId, String token) async {
+    final url = Uri.parse('$baseUrl/workspaces/$workspaceId/metricas/');
+    final response = await http.get(url, headers: _getHeaders(token));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Error fetching workspace metrics: ${response.statusCode}');
+  }
+  Future<Map<String, dynamic>> register(String username, String email, String password) async {
+    final url = Uri.parse('$baseUrl/register/');
+    final response = await http.post(
+      url,
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "username": username,
+        "email": email,
+        "password": password,
+      }),
+    );
+    if (response.statusCode == 201) {
+      return jsonDecode(response.body);
+    } else {
+      // Intentar extraer el mensaje de error del backend
+      String errorMessage;
+      try {
+        final errorJson = jsonDecode(response.body);
+        errorMessage = errorJson['error'] ?? 'Error al registrar usuario.';
+      } catch (_) {
+        errorMessage = 'Error al registrar usuario. Código: ${response.statusCode}';
+      }
+      throw Exception(errorMessage);
+    }
+  }
+  // ========== USER PROFILE ==========
+  Future<Map<String, dynamic>> fetchProfile(String token) async {
+    final url = Uri.parse('$baseUrl/profile/');
+    final response = await http.get(url, headers: _getHeaders(token));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Error fetching profile: ${response.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> data, String token, {String? imagePath, List<int>? imageBytes}) async {
+    final url = Uri.parse('$baseUrl/profile/');
+    final request = http.MultipartRequest('PUT', url)
+      ..headers['Authorization'] = 'Bearer $token';
+    
+    // Añadir campos de texto
+    data.forEach((key, value) {
+      if (value != null) request.fields[key] = value.toString();
+    });
+    
+    // Manejar imagen de diferentes formas según plataforma
+    if (imageBytes != null && imageBytes.isNotEmpty) {
+      // Para web o móvil cuando ya tenemos los bytes
+      final multipartFile = http.MultipartFile.fromBytes(
+        'imagen',
+        imageBytes,
+        filename: 'profile.jpg',
+        contentType: MediaType('image', 'jpeg'),
+      );
+      request.files.add(multipartFile);
+    } else if (imagePath != null && imagePath.isNotEmpty) {
+      // Solo para móvil (iOS/Android): usar fromPath
+      // Pero también podemos leer los bytes del archivo para unificar
+      // Para simplificar, usaremos solo la versión con bytes y pediremos al ProfileScreen que lea los bytes.
+      // Por ahora, lanzamos excepción en web si se usa imagePath sin bytes.
+      throw Exception('Para web, proporciona imageBytes. Usa XFile.readAsBytes().');
+    }
+    
+    final response = await request.send();
+    final responseBody = await response.stream.bytesToString();
+    if (response.statusCode == 200) {
+      return jsonDecode(responseBody);
+    }
+    throw Exception('Error updating profile: ${response.statusCode}');
   }
 }

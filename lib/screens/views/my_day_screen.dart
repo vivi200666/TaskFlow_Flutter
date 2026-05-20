@@ -76,15 +76,15 @@ class MyDayScreen extends StatelessWidget {
                   }
 
                   if (state is TaskLoadedPersonal) {
-                    final todayTasks = state.tasks
+                    final personalTasks = state.tasks
                         .map((map) => Task.fromJson(map))
+                        .where((task) => task.workspaceId == null)
                         .toList();
 
-                    if (todayTasks.isEmpty) {
+                    if (personalTasks.isEmpty) {
                       return _buildEmptyState();
                     }
-
-                    return _buildTaskList(todayTasks);
+                    return _buildTaskList(personalTasks);
                   }
 
                   return const Center(child: Text('Loading...'));

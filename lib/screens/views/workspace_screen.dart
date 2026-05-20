@@ -9,6 +9,9 @@ import '../../bloc/auth/auth_state.dart';
 import '../../bloc/workspace/workspace_cubit.dart';
 import '../../bloc/workspace/workspace_state.dart';
 import '../../models/task_model.dart';
+import '../create_task_modal.dart';
+import 'kanban_screen.dart';
+import 'metrics_screen.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   final int? workspaceId;
@@ -19,19 +22,28 @@ class WorkspaceScreen extends StatefulWidget {
 }
 
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
+  bool _isSaving = false;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   String _selectedPriority = 'M';
   DateTime? _selectedDate;
   int? _selectedUserId;
   bool _showCode = false;
-  bool _showKanban = false;
   List<Map<String, dynamic>> _workspaceMembers = [];
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _fetchInitialData();
+  }
+
+  @override
+  void didUpdateWidget(WorkspaceScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.workspaceId != widget.workspaceId) {
+      _fetchInitialData();
+    }
   }
 
   Future<void> _fetchInitialData() async {
@@ -40,13 +52,43 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
     context.read<TaskCubit>().loadWorkspaceTasks(widget.workspaceId!, authState.token);
 
-    final members = await context.read<WorkspaceCubit>().getWorkspaceMembers(widget.workspaceId!, authState.token);
+    // Cargar miembros usando el endpoint (ahora existente)
+    List<Map<String, dynamic>> members = [];
+    try {
+      members = await context.read<WorkspaceCubit>().getWorkspaceMembers(widget.workspaceId!, authState.token);
+    } catch (e) {
+      print('Error obteniendo miembros: $e');
+    }
+
     if (mounted) {
-      setState(() {
-        _workspaceMembers = members;
-        if (_selectedUserId != null && !_workspaceMembers.any((m) => m['id'] == _selectedUserId)) {
-          _selectedUserId = null;
+      final wsState = context.read<WorkspaceCubit>().state;
+      int? adminId;
+      String? adminUsername;
+      if (wsState is WorkspaceLoaded) {
+        final currentWS = wsState.workspaces.firstWhere(
+          (w) => w['id'] == widget.workspaceId,
+          orElse: () => null,
+        );
+        if (currentWS != null) {
+          final adminRaw = currentWS['admin'];
+          if (adminRaw is int) {
+            adminId = adminRaw;
+            adminUsername = 'Administrador';
+          } else if (adminRaw is Map) {
+            adminId = adminRaw['id'];
+            adminUsername = adminRaw['username'] ?? 'Administrador';
+          }
+          _isAdmin = (adminId == authState.userId);
         }
+      }
+
+      List<Map<String, dynamic>> finalMembers = List.from(members);
+      if (adminId != null && !finalMembers.any((m) => m['id'] == adminId)) {
+        finalMembers.add({'id': adminId, 'username': adminUsername ?? 'Administrador'});
+      }
+      finalMembers.sort((a, b) => (a['username'] ?? '').compareTo(b['username'] ?? ''));
+      setState(() {
+        _workspaceMembers = finalMembers;
       });
     }
   }
@@ -85,6 +127,41 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
             return Scaffold(
               backgroundColor: const Color(0xFFF8F9FA),
+              appBar: AppBar(
+                title: const Text('Workspace'),
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.bar_chart),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MetricsScreen(workspaceId: widget.workspaceId!),
+                        ),
+                      );
+                    },
+                    tooltip: 'Ver métricas',
+                  ),
+                ],
+              ),
+              floatingActionButton: FloatingActionButton.extended(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => KanbanScreen(
+                        workspaceId: widget.workspaceId!,
+                        isAdmin: _isAdmin,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.view_kanban),
+                label: const Text("Ver Kanban"),
+                backgroundColor: Colors.purple,
+              ),
               body: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Column(
@@ -92,15 +169,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   children: [
                     _buildHeader(currentWS),
                     const SizedBox(height: 24),
-                    _buildMetrics(),
-                    const SizedBox(height: 24),
                     _buildQuickForm(),
                     const SizedBox(height: 24),
-                    _buildToggleBar(),
-                    if (_showKanban) ...[
-                      const SizedBox(height: 16),
-                      _buildKanbanView(),
-                    ],
+                    _buildTaskList(),
                   ],
                 ),
               ),
@@ -112,7 +183,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  // ========== CABECERA CON CÓDIGO DE INVITACIÓN ==========
+  // ========== CABECERA (sin cambios) ==========
   Widget _buildHeader(Map<String, dynamic> ws) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -161,53 +232,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  // ========== MÉTRICAS ==========
-  Widget _buildMetrics() {
-    return BlocBuilder<TaskCubit, TaskState>(
-      builder: (context, state) {
-        if (state is TaskLoadedWorkspace) {
-          final tasks = state.tasks.map((t) => Task.fromJson(t)).toList();
-          final todo = tasks.where((t) => t.status == 'TODO').length;
-          final prog = tasks.where((t) => t.status == 'PROG').length;
-          final done = tasks.where((t) => t.status == 'DONE').length;
-
-          return Row(
-            children: [
-              _metricCard("Por hacer", todo, Colors.blue),
-              const SizedBox(width: 12),
-              _metricCard("En curso", prog, Colors.orange),
-              const SizedBox(width: 12),
-              _metricCard("Finalizado", done, Colors.green),
-            ],
-          );
-        }
-        return const SizedBox(height: 80, child: Center(child: LinearProgressIndicator()));
-      },
-    );
-  }
-
-  Widget _metricCard(String title, int count, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.2)),
-        ),
-        child: Column(
-          children: [
-            Text(count.toString(),
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-            const SizedBox(height: 4),
-            Text(title,
-                style: TextStyle(fontSize: 12, color: color.withOpacity(0.8))),
-          ],
-        ),
       ),
     );
   }
@@ -320,8 +344,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   Widget _buildUserDropdown() {
-    final members = _workspaceMembers;
-    if (members.isEmpty) {
+    if (_workspaceMembers.isEmpty) {
       return OutlinedButton.icon(
         onPressed: () {},
         icon: const Icon(Icons.person_outline, size: 16),
@@ -329,7 +352,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12)),
       );
     }
-    final validSelected = _selectedUserId != null && members.any((m) => m['id'] == _selectedUserId)
+    final validSelected = _selectedUserId != null && _workspaceMembers.any((m) => m['id'] == _selectedUserId)
         ? _selectedUserId
         : null;
     if (validSelected != _selectedUserId) {
@@ -347,7 +370,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         child: DropdownButton<int>(
           value: validSelected,
           hint: const Text('Asignar a...'),
-          items: members.map((member) {
+          items: _workspaceMembers.map((member) {
             return DropdownMenuItem<int>(
               value: member['id'],
               child: Text(member['username'] ?? 'Usuario'),
@@ -359,6 +382,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  // ========== CREAR TAREA COMPLETO ==========
   Future<void> _submitTask() async {
     final title = _titleController.text.trim();
     if (title.isEmpty) {
@@ -371,60 +395,65 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final authState = context.read<AuthCubit>().state;
     if (authState is! AuthSuccess) return;
 
-    final formattedDate = _selectedDate != null
-        ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
-        : null;
-
-    final payload = <String, dynamic>{
-      'titulo': title,
-      'descripcion': _descController.text.trim(),
-      'prioridad': _selectedPriority,
-      'fecha_vencimiento': formattedDate,
-      'workspace': widget.workspaceId,
-    };
-    if (_selectedUserId != null) {
-      payload['asignado_a'] = _selectedUserId;
+    if (_selectedUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debes asignar la tarea a un miembro del equipo')),
+      );
+      return;
     }
 
-    await context.read<TaskCubit>().createTask(payload, authState.token);
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
 
-    _titleController.clear();
-    _descController.clear();
-    setState(() {
-      _selectedDate = null;
-    });
+    try {
+      final formattedDate = _selectedDate != null
+          ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
+          : null;
+
+      final payload = <String, dynamic>{
+        'titulo': title,
+        'descripcion': _descController.text.trim(),
+        'prioridad': _selectedPriority,
+        'fecha_vencimiento': formattedDate,
+        'workspace': widget.workspaceId,
+        'asignado_a': _selectedUserId,
+      };
+
+      await context.read<TaskCubit>().createTask(payload, authState.token);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ Tarea creada'), backgroundColor: Colors.green),
+      );
+
+      _titleController.clear();
+      _descController.clear();
+      setState(() {
+        _selectedDate = null;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
-  // ========== BARRA DE ALTERNANCIA ==========
-  Widget _buildToggleBar() {
-    return Row(
-      children: [
-        const Text("Tareas del equipo",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const Spacer(),
-        TextButton.icon(
-          onPressed: () => setState(() => _showKanban = !_showKanban),
-          icon: Icon(_showKanban ? Icons.list : Icons.view_kanban),
-          label: Text(_showKanban ? "Ver Lista" : "Ver Kanban"),
-        ),
-      ],
-    );
-  }
-
-  // ========== VISTA KANBAN (corregida sin errores de layout) ==========
-  Widget _buildKanbanView() {
+  // ========== LISTA DE TAREAS CON PESTAÑAS ==========
+  Widget _buildTaskList() {
     return BlocBuilder<TaskCubit, TaskState>(
       builder: (context, state) {
         if (state is TaskLoading) {
           return const Center(child: CircularProgressIndicator());
         }
         if (state is TaskError) {
-          return _buildErrorState(state.message);
+          return Center(child: Text('Error al cargar tareas: ${state.message}'));
         }
         if (state is TaskLoadedWorkspace) {
           final tasks = state.tasks.map((t) => Task.fromJson(t)).toList();
           if (tasks.isEmpty) {
-            return Center(
+            return Container(
+              padding: const EdgeInsets.all(32),
+              alignment: Alignment.center,
               child: Column(
                 children: [
                   Icon(Icons.inbox_outlined, size: 80, color: Colors.grey.shade300),
@@ -438,239 +467,357 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               ),
             );
           }
-          return _buildKanbanBoard(tasks);
+
+          // Construir mapa de nombres de miembros
+          final Map<int, String> membersMap = {};
+          for (var member in _workspaceMembers) {
+            final id = member['id'] as int;
+            final username = member['username'] as String? ?? 'Usuario';
+            membersMap[id] = username;
+          }
+
+          final authState = context.read<AuthCubit>().state;
+          final currentUserId = authState is AuthSuccess ? authState.userId : null;
+
+          return DefaultTabController(
+            length: 3,
+            child: Column(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: TabBar(
+                    indicatorColor: Colors.purple,
+                    labelColor: Colors.purple,
+                    unselectedLabelColor: Colors.grey,
+                    tabs: const [
+                      Tab(text: 'To Do'),
+                      Tab(text: 'In Progress'),
+                      Tab(text: 'Done'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.6,
+                  child: TabBarView(
+                    children: [
+                      _buildTaskListByStatus(tasks, 'TODO', membersMap, currentUserId),
+                      _buildTaskListByStatus(tasks, 'PROG', membersMap, currentUserId),
+                      _buildTaskListByStatus(tasks, 'DONE', membersMap, currentUserId),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
         }
-        return const Center(child: Text('Cargando tareas...'));
+        return const SizedBox.shrink();
       },
     );
   }
 
-  Widget _buildKanbanBoard(List<Task> tasks) {
-    final todoTasks = tasks.where((t) => t.status == 'TODO').toList();
-    final progTasks = tasks.where((t) => t.status == 'PROG').toList();
-    final doneTasks = tasks.where((t) => t.status == 'DONE').toList();
+  Widget _buildTaskListByStatus(List<Task> allTasks, String status, Map<int, String> membersMap, int? currentUserId) {
+    final filteredTasks = allTasks.where((t) => t.status == status).toList();
+    final order = {'A': 0, 'M': 1, 'B': 2};
+    filteredTasks.sort((a, b) => order[a.priority]!.compareTo(order[b.priority]!));
 
-    // Altura fija para todo el Kanban (evita problemas con Expanded)
-    const double kanbanHeight = 550;
+    if (filteredTasks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox_outlined, size: 64, color: Colors.grey.shade300),
+            const SizedBox(height: 8),
+            Text('No tasks', style: TextStyle(color: Colors.grey.shade500)),
+          ],
+        ),
+      );
+    }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return ListView.builder(
+      itemCount: filteredTasks.length,
+      itemBuilder: (context, index) => _TaskCard(
+        task: filteredTasks[index],
+        isAdmin: _isAdmin,
+        currentUserId: currentUserId,
+        membersMap: membersMap,
+      ),
+    );
+  }
+}
+
+// ========== TARJETA DE TAREA ==========
+class _TaskCard extends StatelessWidget {
+  final Task task;
+  final bool isAdmin;
+  final int? currentUserId;
+  final Map<int, String> membersMap;
+
+  const _TaskCard({
+    required this.task,
+    required this.isAdmin,
+    required this.currentUserId,
+    required this.membersMap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final canEdit = isAdmin || (currentUserId != null && task.assignedTo == currentUserId);
+    final assignedName = task.assignedTo != null
+        ? (membersMap[task.assignedTo] ?? 'User ${task.assignedTo}')
+        : null;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (canEdit)
+                  Checkbox(
+                    value: task.status == 'DONE',
+                    onChanged: (_) => _updateStatus(context, task.status == 'DONE' ? 'TODO' : 'DONE'),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  )
+                else
+                  Container(
+                    width: 24,
+                    height: 24,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey.shade400),
+                    ),
+                    child: task.status == 'DONE' ? const Icon(Icons.check, size: 16, color: Colors.green) : null,
+                  ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          decoration: task.status == 'DONE' ? TextDecoration.lineThrough : null,
+                          color: task.status == 'DONE' ? Colors.grey.shade500 : Colors.grey.shade800,
+                        ),
+                      ),
+                      if (task.description.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          task.description,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade600,
+                            decoration: task.status == 'DONE' ? TextDecoration.lineThrough : null,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      _buildMetadata(assignedName),
+                    ],
+                  ),
+                ),
+                if (canEdit)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        _editTask(context);
+                      } else if (value == 'delete') {
+                        _deleteTask(context);
+                      } else if (value == 'TODO' || value == 'PROG' || value == 'DONE') {
+                        _updateStatus(context, value);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'TODO', child: Text('To Do')),
+                      const PopupMenuItem(value: 'PROG', child: Text('In Progress')),
+                      const PopupMenuItem(value: 'DONE', child: Text('Done')),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(value: 'edit', child: Row(
+                        children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Edit')],
+                      )),
+                      const PopupMenuItem(value: 'delete', child: Row(
+                        children: [Icon(Icons.delete, size: 18, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))],
+                      )),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetadata(String? assignedName) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
-        _buildKanbanColumn("To Do", todoTasks, Colors.blue, kanbanHeight),
-        const SizedBox(width: 16),
-        _buildKanbanColumn("In Progress", progTasks, Colors.orange, kanbanHeight),
-        const SizedBox(width: 16),
-        _buildKanbanColumn("Done", doneTasks, Colors.green, kanbanHeight),
+        _buildPriorityBadge(),
+        if (task.categoryDetails != null) _buildCategoryBadge(),
+        if (task.dueDate != null) _buildDueDateBadge(),
+        if (assignedName != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.purple.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.purple.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person, size: 12, color: Colors.purple),
+                const SizedBox(width: 4),
+                Text(assignedName, style: const TextStyle(fontSize: 11, color: Colors.purple, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
       ],
     );
   }
 
-  // Nueva implementación de columna sin usar Expanded dentro de la columna
-  Widget _buildKanbanColumn(String title, List<Task> tasks, Color color, double height) {
-    return Expanded(
-      child: Container(
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade50,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Encabezado fijo
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-                  const SizedBox(width: 8),
-                  Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(tasks.length.toString(),
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color)),
-                  ),
-                ],
-              ),
-            ),
-            // Lista de tareas con scroll interno
-            Expanded(
-              child: tasks.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade300),
-                          const SizedBox(height: 8),
-                          Text('No tasks', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: tasks.length,
-                      itemBuilder: (context, index) => _buildTaskCard(tasks[index], color),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTaskCard(Task task, Color columnColor) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(task.title,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis),
-            if (task.description.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(task.description,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
-            ],
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _buildPriorityBadge(task.priority),
-                if (task.categoryDetails != null) _buildCategoryBadge(task.categoryDetails!),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    if (task.status != 'TODO')
-                      _buildMoveButton(Icons.arrow_back, "Mover izquierda",
-                          _getPreviousState(task.status), task.id),
-                    if (task.status != 'DONE')
-                      _buildMoveButton(Icons.arrow_forward, "Mover derecha",
-                          _getNextState(task.status), task.id),
-                  ],
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  color: Colors.red,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => _deleteTask(task),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPriorityBadge(String priority) {
-    final color = priority == 'A' ? Colors.red : priority == 'M' ? Colors.orange : Colors.green;
-    final label = priority == 'A' ? 'High' : priority == 'M' ? 'Med' : 'Low';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Text(label, style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.w600)),
-    );
-  }
-
-  Widget _buildCategoryBadge(Map<String, dynamic> details) {
-    Color categoryColor = Colors.grey;
-    String categoryName = details['nombre'] ?? '';
-    final rawColor = (details['color'] ?? '').toString().trim();
-    try {
-      String hex = rawColor.replaceAll('#', '');
-      if (hex.length == 6) {
-        categoryColor = Color(int.parse('0xFF$hex'));
-      } else if (hex.length == 8) {
-        categoryColor = Color(int.parse('0x$hex'));
-      }
-    } catch (_) {
-      final name = rawColor.toLowerCase();
-      final nameMap = {
-        'rojo': Colors.red,
-        'azul': Colors.blue,
-        'verde': Colors.green,
-        'amarillo': Colors.yellow,
-        'gris': Colors.grey,
-      };
-      categoryColor = nameMap[name] ?? Colors.grey;
+  Widget _buildPriorityBadge() {
+    Color color;
+    String label;
+    IconData icon;
+    switch (task.priority) {
+      case 'A':
+        color = Colors.red;
+        label = 'High';
+        icon = Icons.flag;
+        break;
+      case 'M':
+        color = Colors.orange;
+        label = 'Medium';
+        icon = Icons.flag;
+        break;
+      case 'B':
+        color = Colors.green;
+        label = 'Low';
+        icon = Icons.flag;
+        break;
+      default:
+        color = Colors.grey;
+        label = 'None';
+        icon = Icons.flag_outlined;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: categoryColor.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: categoryColor.withOpacity(0.3)),
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: categoryColor, shape: BoxShape.circle)),
+          Icon(icon, size: 12, color: color),
           const SizedBox(width: 4),
-          Text(categoryName,
-              style: TextStyle(fontSize: 9, color: categoryColor, fontWeight: FontWeight.w600)),
+          Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 
-  Widget _buildMoveButton(IconData icon, String tooltip, String newState, int taskId) {
-    return IconButton(
-      icon: Icon(icon, size: 16),
-      tooltip: tooltip,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      onPressed: () => _moveTask(taskId, newState),
+  Widget _buildCategoryBadge() {
+    final categoryColor = Color(int.parse('0xFF${task.categoryDetails!['color']}'));
+    final categoryName = task.categoryDetails!['nombre'];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: categoryColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: categoryColor.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 8, height: 8, decoration: BoxDecoration(color: categoryColor, shape: BoxShape.circle)),
+          const SizedBox(width: 4),
+          Text(categoryName, style: TextStyle(fontSize: 11, color: categoryColor, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 
-  String _getPreviousState(String current) =>
-      current == 'PROG' ? 'TODO' : current == 'DONE' ? 'PROG' : current;
-  String _getNextState(String current) =>
-      current == 'TODO' ? 'PROG' : current == 'PROG' ? 'DONE' : current;
+  Widget _buildDueDateBadge() {
+    final dueDate = DateTime.parse(task.dueDate!);
+    final now = DateTime.now();
+    final difference = dueDate.difference(now).inDays;
+    Color color;
+    IconData icon;
+    String label;
+    if (difference < 0) {
+      color = Colors.red;
+      icon = Icons.warning;
+      label = 'Overdue';
+    } else if (difference == 0) {
+      color = Colors.orange;
+      icon = Icons.today;
+      label = 'Today';
+    } else if (difference == 1) {
+      color = Colors.blue;
+      icon = Icons.event;
+      label = 'Tomorrow';
+    } else {
+      color = Colors.grey;
+      icon = Icons.event;
+      label = DateFormat('MMM d').format(dueDate);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 
-  void _moveTask(int taskId, String newState) {
+  void _updateStatus(BuildContext context, String newStatus) {
     final authState = context.read<AuthCubit>().state;
     if (authState is AuthSuccess) {
-      context.read<TaskCubit>().updateTask(taskId, {'estado': newState}, authState.token);
+      context.read<TaskCubit>().updateTask(task.id, {'estado': newStatus}, authState.token);
     }
   }
 
-  void _deleteTask(Task task) {
+  void _editTask(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => CreateTaskModal(task: task),
+    );
+  }
+
+  void _deleteTask(BuildContext context) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -688,24 +835,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             },
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState(String message) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 64, color: Colors.red),
-          const SizedBox(height: 16),
-          Text('Error al cargar el workspace',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.grey.shade800)),
-          const SizedBox(height: 8),
-          Text(message,
-              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
-              textAlign: TextAlign.center),
         ],
       ),
     );

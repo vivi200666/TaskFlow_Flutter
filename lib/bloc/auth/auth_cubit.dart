@@ -29,20 +29,44 @@ class AuthCubit extends Cubit<AuthState> {
   /// Perform login with username and password.
   Future<void> login(String username, String password) async {
     if (username.isEmpty || password.isEmpty) {
-      emit(const AuthError("Please fill in all required fields."));
+      emit(const AuthError("Por favor completa todos los campos."));
+      return;
+    }
+    try {
+      emit(AuthLoading());
+      final data = await apiProvider.login(username, password);
+      final String token = data['access'] ?? '';
+      final int userId = data['user_id'] ?? 0;
+
+      if (token.isEmpty) {
+        emit(const AuthError("No se recibió token."));
+        return;
+      }
+
+      await _secureStorage.write(key: 'token', value: token);
+      await _secureStorage.write(key: 'userId', value: userId.toString());
+
+      emit(AuthSuccess(token: token, userId: userId));
+    } catch (e) {
+      emit(AuthError(e.toString().replaceAll("Exception: ", "")));
+    }
+  }
+
+  /// Register a new user
+  Future<void> register(String username, String email, String password) async {
+    if (username.isEmpty || password.isEmpty || email.isEmpty) {
+      emit(const AuthError("Todos los campos son obligatorios."));
       return;
     }
 
     try {
       emit(AuthLoading());
-
-      final data = await apiProvider.login(username, password);
-
+      final data = await apiProvider.register(username, email, password);
       final String token = data['access'] ?? '';
       final int userId = data['user_id'] ?? 0;
 
       if (token.isEmpty) {
-        emit(const AuthError("No token received from server."));
+        emit(const AuthError("No se recibió el token de acceso."));
         return;
       }
 

@@ -10,9 +10,9 @@ import '../../models/task_model.dart';
 import '../models/category_model.dart';
 
 class CreateTaskModal extends StatefulWidget {
-  final Task? task; // 👈 Agrega esta línea
-  const CreateTaskModal({super.key, this.task});
-
+  final Task? task;
+  final int? initialCategoryId;
+  const CreateTaskModal({super.key, this.task, this.initialCategoryId});
 
   @override
   State<CreateTaskModal> createState() => _CreateTaskModalState();
@@ -22,39 +22,32 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
 
-  String _selectedPriority = 'M'; // Default: Medium
+  String _selectedPriority = 'M';
   DateTime? _selectedDate;
   int? _selectedCategory;
   List<Category> _categories = [];
   bool _loadingCategories = false;
-  bool _isSaving = false; // ← nuevo: para evitar doble clic
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    
-    // 1. Verificamos si recibimos una tarea para editar
     if (widget.task != null) {
-      // Llenamos los campos de texto con la info actual
       _titleController.text = widget.task!.title;
       _descriptionController.text = widget.task!.description;
-      
-      // Cargamos los selectores (Prioridad, Categoría, Fecha)
       _selectedPriority = widget.task!.priority;
       _selectedCategory = widget.task!.categoryId;
-      
       if (widget.task!.dueDate != null) {
         _selectedDate = DateTime.tryParse(widget.task!.dueDate!);
       }
+    } else if (widget.initialCategoryId != null) {
+      _selectedCategory = widget.initialCategoryId;
     }
-    
-    // 2. Cargamos las categorías (esto ya lo tenías)
     _loadCategories();
-}
+  }
 
   Future<void> _loadCategories() async {
     setState(() => _loadingCategories = true);
-
     final categoryState = context.read<CategoryCubit>().state;
     if (categoryState is CategoryLoaded) {
       setState(() {
@@ -80,13 +73,9 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       firstDate: DateTime.now(),
       lastDate: DateTime(2100),
     );
-
-    if (picked != null) {
-      setState(() => _selectedDate = picked);
-    }
+    if (picked != null) setState(() => _selectedDate = picked);
   }
 
-  // ✅ Ahora es async y espera la creación
   Future<void> _saveTask() async {
     if (_titleController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,20 +101,15 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       'prioridad': _selectedPriority,
       'fecha_vencimiento': formattedDate,
     };
-    
     if (_selectedCategory != null) {
       payload['categoria'] = _selectedCategory;
     }
 
-    // --- EL CAMBIO ESTÁ AQUÍ ---
     if (widget.task == null) {
-      // Si no hay tarea en el widget, es una nueva
       await context.read<TaskCubit>().createTask(payload, authState.token);
     } else {
-      // Si hay tarea, usamos su ID para ACTUALIZAR en lugar de crear
       await context.read<TaskCubit>().updateTask(widget.task!.id, payload, authState.token);
     }
-    // ---------------------------
 
     await Future.delayed(const Duration(milliseconds: 300));
 
@@ -148,165 +132,82 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // HEADER
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'New Task',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
+                  const Text('New Task', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                 ],
               ),
               const SizedBox(height: 20),
-
-              // TITLE
               TextField(
                 controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Title *',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.title),
-                ),
+                decoration: const InputDecoration(labelText: 'Title *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.title)),
               ),
               const SizedBox(height: 16),
-
-              // DESCRIPTION
               TextField(
                 controller: _descriptionController,
                 maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.description),
-                ),
+                decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder(), prefixIcon: Icon(Icons.description)),
               ),
               const SizedBox(height: 16),
-
-              // PRIORITY
               DropdownButtonFormField<String>(
                 value: _selectedPriority,
-                decoration: const InputDecoration(
-                  labelText: 'Priority',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.flag),
-                ),
+                decoration: const InputDecoration(labelText: 'Priority', border: OutlineInputBorder(), prefixIcon: Icon(Icons.flag)),
                 items: const [
                   DropdownMenuItem(value: 'A', child: Text('🔴 High')),
                   DropdownMenuItem(value: 'M', child: Text('🟡 Medium')),
                   DropdownMenuItem(value: 'B', child: Text('🟢 Low')),
                 ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _selectedPriority = value);
-                  }
-                },
+                onChanged: (value) => setState(() => _selectedPriority = value!),
               ),
               const SizedBox(height: 16),
-
-              // DUE DATE
               InkWell(
                 onTap: _selectDate,
                 child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Due Date',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.calendar_today),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Due Date', border: OutlineInputBorder(), prefixIcon: Icon(Icons.calendar_today)),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _selectedDate == null
-                            ? 'No date'
-                            : DateFormat('MM/dd/yyyy').format(_selectedDate!),
-                      ),
+                      Text(_selectedDate == null ? 'No date' : DateFormat('MM/dd/yyyy').format(_selectedDate!)),
                       if (_selectedDate != null)
-                        IconButton(
-                          icon: const Icon(Icons.clear, size: 18),
-                          onPressed: () {
-                            setState(() => _selectedDate = null);
-                          },
-                        ),
+                        IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () => setState(() => _selectedDate = null)),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-
-              // CATEGORY
               _loadingCategories
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
+                  ? const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
                   : DropdownButtonFormField<int>(
                       value: _selectedCategory,
-                      decoration: const InputDecoration(
-                        labelText: 'Category',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.label),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder(), prefixIcon: Icon(Icons.label)),
                       hint: const Text('No category'),
                       items: _categories.map((cat) {
                         return DropdownMenuItem<int>(
                           value: cat.id,
                           child: Row(
                             children: [
-                              Container(
-                                width: 16,
-                                height: 16,
-                                decoration: BoxDecoration(
-                                  color: cat.getColor(),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
+                              Container(width: 16, height: 16, decoration: BoxDecoration(color: cat.getColor(), shape: BoxShape.circle)),
                               const SizedBox(width: 8),
                               Text(cat.name),
                             ],
                           ),
                         );
                       }).toList(),
-                      onChanged: (value) {
-                        setState(() => _selectedCategory = value);
-                      },
+                      onChanged: (value) => setState(() => _selectedCategory = value),
                     ),
               const SizedBox(height: 24),
-
-              // BUTTONS
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
+                  TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
                   const SizedBox(width: 8),
                   ElevatedButton(
-                    onPressed: _isSaving ? null : _saveTask, // ← deshabilitar mientras guarda
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
-                    ),
+                    onPressed: _isSaving ? null : _saveTask,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
                     child: _isSaving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Save'),
                   ),
                 ],

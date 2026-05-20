@@ -8,6 +8,8 @@ class Task {
   final bool completed;
   final int? categoryId;
   final Map<String, dynamic>? categoryDetails;
+  final int? assignedTo;
+  final int? workspaceId; // ✅ Nuevo campo: ID del workspace al que pertenece (null = personal)
 
   Task({
     required this.id,
@@ -19,6 +21,8 @@ class Task {
     required this.completed,
     this.categoryId,
     this.categoryDetails,
+    this.assignedTo,
+    this.workspaceId,
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -32,6 +36,8 @@ class Task {
       completed: json['completada'] ?? false,
       categoryId: json['categoria'],
       categoryDetails: json['categoria_detalles'],
+      assignedTo: json['asignado_a'],
+      workspaceId: json['workspace'], // ← clave que envía Django
     );
   }
 
@@ -45,6 +51,8 @@ class Task {
       'fecha_vencimiento': dueDate,
       'completada': completed,
       'categoria': categoryId,
+      'asignado_a': assignedTo,
+      'workspace': workspaceId,
     };
   }
 
@@ -58,6 +66,8 @@ class Task {
     bool? completed,
     int? categoryId,
     Map<String, dynamic>? categoryDetails,
+    int? assignedTo,
+    int? workspaceId,
   }) {
     return Task(
       id: id ?? this.id,
@@ -69,6 +79,8 @@ class Task {
       completed: completed ?? this.completed,
       categoryId: categoryId ?? this.categoryId,
       categoryDetails: categoryDetails ?? this.categoryDetails,
+      assignedTo: assignedTo ?? this.assignedTo,
+      workspaceId: workspaceId ?? this.workspaceId,
     );
   }
 }

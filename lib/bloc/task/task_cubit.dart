@@ -7,11 +7,11 @@ class TaskCubit extends Cubit<TaskState> {
 
   TaskCubit(this.apiProvider) : super(TaskInitial());
 
-  /// Load all personal tasks of the user
+  /// Load all personal tasks of the user (todas, sin filtrar)
   Future<void> loadPersonalTasks(String token) async {
     try {
       emit(TaskLoading());
-      final list = await apiProvider.fetchTasks(token: token); // renamed
+      final list = await apiProvider.fetchTasks(token: token);
       final orderedTasks = _orderByPriority(list);
       emit(TaskLoadedPersonal(tasks: orderedTasks));
     } catch (e) {
@@ -23,11 +23,39 @@ class TaskCubit extends Cubit<TaskState> {
   Future<void> loadWorkspaceTasks(int workspaceId, String token) async {
     try {
       emit(TaskLoading());
-      final list = await apiProvider.fetchTasks(token: token, workspaceId: workspaceId); // renamed
+      final list = await apiProvider.fetchTasks(token: token, workspaceId: workspaceId);
       final orderedTasks = _orderByPriority(list);
       emit(TaskLoadedWorkspace(tasks: orderedTasks));
     } catch (e) {
       emit(TaskError('Error loading workspace tasks: $e'));
+    }
+  }
+
+  /// Load ONLY completed tasks (estado == 'DONE')
+  Future<void> loadCompletedTasks(String token) async {
+    try {
+      emit(TaskLoading());
+      final list = await apiProvider.fetchTasks(token: token);
+      final completedTasks = list.where((t) => t['estado'] == 'DONE').toList();
+      final orderedTasks = _orderByPriority(completedTasks);
+      emit(TaskLoadedPersonal(tasks: orderedTasks));
+    } catch (e) {
+      emit(TaskError('Error loading completed tasks: $e'));
+    }
+  }
+
+  /// Load upcoming tasks (not DONE and with dueDate not null)
+  Future<void> loadUpcomingTasks(String token) async {
+    try {
+      emit(TaskLoading());
+      final list = await apiProvider.fetchTasks(token: token);
+      final upcomingTasks = list.where((t) => 
+        t['estado'] != 'DONE' && t['fecha_vencimiento'] != null
+      ).toList();
+      final orderedTasks = _orderByPriority(upcomingTasks);
+      emit(TaskLoadedPersonal(tasks: orderedTasks));
+    } catch (e) {
+      emit(TaskError('Error loading upcoming tasks: $e'));
     }
   }
 
@@ -75,50 +103,7 @@ class TaskCubit extends Cubit<TaskState> {
     emit(TaskInitial());
   }
 
-  /// Order tasks by priority (A > M > B)
-  List<Map<String, dynamic>> _orderByPriority(List<Map<String, dynamic>> tasks) {
-    final order = {'A': 0, 'M': 1, 'B': 2};
-    tasks.sort((a, b) {
-      final pa = order[a['prioridad']] ?? 3;
-      final pb = order[b['prioridad']] ?? 3;
-      if (pa != pb) return pa.compareTo(pb);
-      final da = a['fecha_vencimiento'] ?? '';
-      final db = b['fecha_vencimiento'] ?? '';
-      return da.toString().compareTo(db.toString());
-    });
-    return tasks;
-  }
-  Future<void> loadCompletedTasks(String token) async {
-    try {
-      emit(TaskLoading());
-      final list = await apiProvider.fetchTasks(token: token);
-      
-      // Filtramos solo las que tienen estado 'realizada' (o el nombre que uses en tu DB)
-      final completed = list.where((t) => t['estado'] == 'realizada').toList();
-      
-      // Reutilizamos TaskLoadedPersonal o puedes crear TaskLoadedCompleted en tu state
-      emit(TaskLoadedPersonal(tasks: completed)); 
-    } catch (e) {
-      emit(TaskError('Error al cargar tareas completadas: $e'));
-    }
-  }
-  Future<void> loadUpcomingTasks(String token) async {
-    try {
-      emit(TaskLoading());
-      final list = await apiProvider.fetchTasks(token: token);
-      
-      // Filtramos las que NO están terminadas y tienen fecha
-      final upcoming = list.where((t) => 
-        t['estado'] != 'realizada' && t['fecha_vencimiento'] != null
-      ).toList();
-      
-      emit(TaskLoadedPersonal(tasks: upcoming));
-    } catch (e) {
-      emit(TaskError('Error al cargar próximas tareas: $e'));
-    }
-  }
-  // En task_cubit.dart
-
+  /// Optimistic update for task status (to avoid flickering)
   Future<void> updateTaskStatus(int id, String newStatus, String token) async {
     try {
       // 1. Avisamos al backend
@@ -127,24 +112,41 @@ class TaskCubit extends Cubit<TaskState> {
       // 2. Actualizamos la lista que ya tenemos en memoria (Optimización)
       if (state is TaskLoadedWorkspace) {
         final currentTasks = List<Map<String, dynamic>>.from((state as TaskLoadedWorkspace).tasks);
-        
-        // Buscamos la tarea y le cambiamos el estado localmente
         final index = currentTasks.indexWhere((t) => t['id'] == id);
         if (index != -1) {
           currentTasks[index]['estado'] = newStatus;
-          // Emitimos el nuevo estado con la lista modificada para que la UI se refresque
           emit(TaskLoadedWorkspace(tasks: _orderByPriority(currentTasks)));
+        }
+      } else if (state is TaskLoadedPersonal) {
+        final currentTasks = List<Map<String, dynamic>>.from((state as TaskLoadedPersonal).tasks);
+        final index = currentTasks.indexWhere((t) => t['id'] == id);
+        if (index != -1) {
+          currentTasks[index]['estado'] = newStatus;
+          emit(TaskLoadedPersonal(tasks: _orderByPriority(currentTasks)));
         }
       }
     } catch (e) {
       emit(TaskError('Error al mover la tarea: $e'));
     }
   }
+
   /// Emite estado de carga para limpiar la UI inmediatamente al cambiar de vista
   void emitLoading() {
     emit(TaskLoading());
   }
-        
-  
 
+  /// Order tasks by priority (A > M > B) and then by due date
+  List<Map<String, dynamic>> _orderByPriority(List<Map<String, dynamic>> tasks) {
+    final order = {'A': 0, 'M': 1, 'B': 2};
+    final sorted = List<Map<String, dynamic>>.from(tasks);
+    sorted.sort((a, b) {
+      final pa = order[a['prioridad']] ?? 3;
+      final pb = order[b['prioridad']] ?? 3;
+      if (pa != pb) return pa.compareTo(pb);
+      final da = a['fecha_vencimiento'] ?? '';
+      final db = b['fecha_vencimiento'] ?? '';
+      return da.toString().compareTo(db.toString());
+    });
+    return sorted;
+  }
 }

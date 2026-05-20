@@ -7,7 +7,7 @@ import 'views/upcoming_tasks_screen.dart';
 import 'views/completed_screen.dart';
 import 'views/category_screen.dart';
 import 'views/workspace_screen.dart';
-
+import 'profile_screen.dart';
 import '../bloc/auth/auth_cubit.dart';
 import '../bloc/task/task_cubit.dart';
 import '../bloc/auth/auth_state.dart';
@@ -550,6 +550,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.person, size: 20),
+            title: const Text('Mi Perfil', style: TextStyle(fontSize: 13)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
+            },
+          ),
           ListTile(
             dense: true,
             leading: const Icon(Icons.settings, size: 20),

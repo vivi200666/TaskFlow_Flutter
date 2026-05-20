@@ -14,6 +14,14 @@ class UpcomingTasksScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final authState = context.watch<AuthCubit>().state;
+    if (authState is AuthSuccess) {
+      final taskCubit = context.read<TaskCubit>();
+      if (taskCubit.state is TaskInitial) {
+        Future.microtask(() => taskCubit.loadUpcomingTasks(authState.token));
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(32),
       child: Column(
@@ -59,35 +67,46 @@ class UpcomingTasksScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // Task list
+          // Task list con BlocListener para refrescar automáticamente
           Expanded(
-            child: BlocBuilder<TaskCubit, TaskState>(
-              builder: (context, state) {
-                if (state is TaskLoading) {
-                  return const Center(child: CircularProgressIndicator());
+            child: BlocListener<TaskCubit, TaskState>(
+              listener: (context, state) {
+                final authState = context.read<AuthCubit>().state;
+                if (authState is! AuthSuccess) return;
+
+                if (state is TaskCreated || state is TaskUpdated || state is TaskDeleted) {
+                  context.read<TaskCubit>().loadUpcomingTasks(authState.token);
+                } else if (state is TaskError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${state.message}'), backgroundColor: Colors.red),
+                  );
                 }
-
-                if (state is TaskError) {
-                  return _buildErrorState(state.message);
-                }
-
-                if (state is TaskLoadedPersonal) {
-                  // Convert maps to Task objects
-                  final allTasks = state.tasks
-                      .map((map) => Task.fromJson(map))
-                      .toList();
-                  // Filter tasks with due dates
-                  final upcomingTasks = _filterUpcomingTasks(allTasks);
-
-                  if (upcomingTasks.isEmpty) {
-                    return _buildEmptyState();
+              },
+              child: BlocBuilder<TaskCubit, TaskState>(
+                builder: (context, state) {
+                  if (state is TaskLoading) {
+                    return const Center(child: CircularProgressIndicator());
                   }
 
-                  return _buildGroupedTaskList(upcomingTasks);
-                }
+                  if (state is TaskError) {
+                    return _buildErrorState(state.message);
+                  }
 
-                return const Center(child: Text('Loading...'));
-              },
+                  if (state is TaskLoadedPersonal) {
+                    final upcomingTasks = state.tasks
+                        .map((map) => Task.fromJson(map))
+                        .toList();
+
+                    if (upcomingTasks.isEmpty) {
+                      return _buildEmptyState();
+                    }
+
+                    return _buildTaskList(upcomingTasks);
+                  }
+
+                  return const Center(child: Text('Loading...'));
+                },
+              ),
             ),
           ),
         ],
@@ -95,35 +114,18 @@ class UpcomingTasksScreen extends StatelessWidget {
     );
   }
 
-  List<Task> _filterUpcomingTasks(List<Task> tasks) {
-    final now = DateTime.now();
-    return tasks.where((task) {
-      if (task.dueDate == null) return false;
-      final dueDate = DateTime.parse(task.dueDate!);
-      return dueDate.isAfter(now) || _isSameDay(dueDate, now);
-    }).toList()
-      ..sort((a, b) {
-        final dateA = DateTime.parse(a.dueDate!);
-        final dateB = DateTime.parse(b.dueDate!);
-        return dateA.compareTo(dateB);
-      });
-  }
-
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
-  Widget _buildGroupedTaskList(List<Task> tasks) {
+  Widget _buildTaskList(List<Task> tasks) {
+    // Agrupar por fecha (opcional, como tenías antes)
     final Map<String, List<Task>> groupedTasks = {};
-
     for (var task in tasks) {
-      final dueDate = DateTime.parse(task.dueDate!);
-      final key = _getDateGroupKey(dueDate);
-
-      if (!groupedTasks.containsKey(key)) {
-        groupedTasks[key] = [];
+      if (task.dueDate != null) {
+        final dueDate = DateTime.parse(task.dueDate!);
+        final key = _getDateGroupKey(dueDate);
+        if (!groupedTasks.containsKey(key)) {
+          groupedTasks[key] = [];
+        }
+        groupedTasks[key]!.add(task);
       }
-      groupedTasks[key]!.add(task);
     }
 
     return ListView.builder(
@@ -147,7 +149,6 @@ class UpcomingTasksScreen extends StatelessWidget {
                 ),
               ),
             ),
-            // Tasks in group
             ...tasksInGroup.map((task) => _TaskCard(task: task)),
             const SizedBox(height: 16),
           ],
@@ -170,6 +171,10 @@ class UpcomingTasksScreen extends StatelessWidget {
     } else {
       return DateFormat('MMMM yyyy').format(date);
     }
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   Widget _buildEmptyState() {
@@ -231,36 +236,25 @@ class UpcomingTasksScreen extends StatelessWidget {
   }
 }
 
-// ========== TASK CARD (Simplified version) ==========
+// ========== TASK CARD (igual al de MyDay pero con botones de estado) ==========
 class _TaskCard extends StatelessWidget {
   final Task task;
-
   const _TaskCard({required this.task});
 
   @override
   Widget build(BuildContext context) {
-    final dueDate = DateTime.parse(task.dueDate!);
-    final now = DateTime.now();
-    final isOverdue = dueDate.isBefore(now);
-
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isOverdue ? Colors.red.shade200 : Colors.grey.shade200,
-        ),
+        side: BorderSide(color: Colors.grey.shade200),
       ),
       child: ListTile(
         leading: Checkbox(
           value: task.completed,
           onChanged: (value) {
-            final authState = context.read<AuthCubit>().state;
-            if (authState is! AuthSuccess) return;
-
-            final newStatus = task.completed ? 'TODO' : 'DONE';
-            _updateTaskStatus(context, task.id, newStatus, authState.token);
+            _toggleTaskCompletion(context, task);
           },
         ),
         title: Text(
@@ -285,16 +279,16 @@ class _TaskCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  isOverdue ? Icons.warning : Icons.event,
+                  Icons.event,
                   size: 14,
-                  color: isOverdue ? Colors.red : Colors.blue,
+                  color: Colors.blue,
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  DateFormat('MMM d, yyyy').format(dueDate),
-                  style: TextStyle(
+                  DateFormat('MMM d, yyyy').format(DateTime.parse(task.dueDate!)),
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: isOverdue ? Colors.red : Colors.blue,
+                    color: Colors.blue,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -306,9 +300,21 @@ class _TaskCard extends StatelessWidget {
           onSelected: (value) {
             if (value == 'delete') {
               _deleteTask(context, task);
+            } else if (value == 'edit') {
+              _editTask(context, task);
             }
           },
           itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'edit',
+              child: Row(
+                children: [
+                  Icon(Icons.edit, size: 18),
+                  SizedBox(width: 8),
+                  Text('Edit'),
+                ],
+              ),
+            ),
             const PopupMenuItem(
               value: 'delete',
               child: Row(
@@ -325,12 +331,19 @@ class _TaskCard extends StatelessWidget {
     );
   }
 
-  void _updateTaskStatus(BuildContext context, int taskId, String newStatus, String token) {
-    context.read<TaskCubit>().updateTask(
-          taskId,
-          {'estado': newStatus},
-          token,
-        );
+  void _toggleTaskCompletion(BuildContext context, Task task) {
+    final authState = context.read<AuthCubit>().state;
+    if (authState is! AuthSuccess) return;
+
+    final newStatus = task.completed ? 'TODO' : 'DONE';
+    context.read<TaskCubit>().updateTask(task.id, {'estado': newStatus}, authState.token);
+  }
+
+  void _editTask(BuildContext context, Task task) {
+    showDialog(
+      context: context,
+      builder: (context) => CreateTaskModal(task: task),
+    );
   }
 
   void _deleteTask(BuildContext context, Task task) {
@@ -348,17 +361,11 @@ class _TaskCard extends StatelessWidget {
             onPressed: () {
               final authState = context.read<AuthCubit>().state;
               if (authState is AuthSuccess) {
-                context.read<TaskCubit>().deleteTask(
-                      task.id,
-                      authState.token,
-                    );
+                context.read<TaskCubit>().deleteTask(task.id, authState.token);
               }
               Navigator.pop(dialogContext);
             },
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),

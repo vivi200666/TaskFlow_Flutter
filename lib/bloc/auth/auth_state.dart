@@ -27,3 +27,24 @@ class AuthError extends AuthState {
   @override
   List<Object?> get props => [message];
 }
+
+// 👇 Nuevos estados para registro
+class RegisterLoading extends AuthState {}
+
+class RegisterSuccess extends AuthState {
+  final String token;
+  final int userId;
+
+  const RegisterSuccess({required this.token, required this.userId});
+
+  @override
+  List<Object?> get props => [token, userId];
+}
+
+class RegisterError extends AuthState {
+  final String message;
+  const RegisterError(this.message);
+
+  @override
+  List<Object?> get props => [message];
+}

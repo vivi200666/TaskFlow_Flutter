@@ -74,9 +74,22 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   /// Fetch workspace members without changing the global state
   Future<List<Map<String, dynamic>>> getWorkspaceMembers(int workspaceId, String token) async {
     try {
-      return await apiProvider.fetchWorkspaceMembers(workspaceId, token);
+      print('🚀 Llamando a getWorkspaceMembers con workspaceId: $workspaceId');
+      final members = await apiProvider.fetchWorkspaceMembers(workspaceId, token);
+      print('✅ Miembros obtenidos: $members');
+      return members;
     } catch (e) {
+      print('❌ Error en getWorkspaceMembers: $e');
       return [];
+    }
+  }
+  /// Fetch workspace metrics (without changing global state)
+  Future<Map<String, dynamic>> getWorkspaceMetrics(int workspaceId, String token) async {
+    try {
+      return await apiProvider.fetchWorkspaceMetrics(workspaceId, token);
+    } catch (e) {
+      print('Error en getWorkspaceMetrics: $e');  // 👈 Ver en consola
+      return {};
     }
   }
 
